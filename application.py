@@ -62,10 +62,10 @@ class Data:
         self.period = n
         self.runs = 2 * int(math.ceil(n / 200))
 
-    def get(self):
+    def get_data(self):
         data = []
         while self.runs > 0:
-            response = public_client.get_product_historic_rates(
+            response = self.public_client.get_product_historic_rates(
                 'BTC-USD', start=self.start_time, end=(self.end_time), granularity=60)
             if 'message' in response:
                 self.runs += 1
@@ -78,8 +78,8 @@ class Data:
                 time.sleep(0.5)
         return (flatten(data))
 
-    def get_ewa(self):
-        data = self.get()
+    def get_ewm(self):
+        data = get_data()
         labels = ['timestamp', 'low', 'high', 'open', 'close', 'volume']
         df = pd.DataFrame.from_records(data, columns=labels)
         df = df.set_index('timestamp')
@@ -90,7 +90,7 @@ class Data:
         return df['ewm'].iloc[-1]
 
 
-class EWA:
+class EWM:
     def __init__(self, average, period):
         self.average = average
         self.period = period
@@ -105,7 +105,7 @@ class EWA:
 
 
 class Tick:
-    def __init__(self, tick_dict, ewa):
+    def __init__(self, tick_dict, ewm):
         self.sequence = tick_dict['sequence']
         self.product_id = tick_dict['product_id']
         self.best_bid = float(tick_dict['best_bid'])
@@ -115,7 +115,7 @@ class Tick:
         self.size = float(tick_dict['last_size'])
         self.time = datetime.strptime(
             tick_dict['time'], '%Y-%m-%dT%H:%M:%S.%fZ')
-        self.ewa = ewa
+        self.ewm = ewm
 
     def get_price(self):
         return self.price
@@ -127,8 +127,8 @@ class Tick:
     def __repr__(self):
         rep = "{}\t\t\t\t {}\n".format(self.product_id, self.time)
         rep += "=====================================================================================\n"
-        rep += "Price: ${:.2f}\t\tSize: {:.8f}\tSide: {: >5}\tEWA: {: >5}\n".format(
-            self.price, self.size, self.side, self.ewa)
+        rep += "Price: ${:.2f}\t\tSize: {:.8f}\tSide: {: >5}\tewm: {: >5}\n".format(
+            self.price, self.size, self.side, self.ewm)
         rep += "Best ask: ${:.2f}\tBest bid: ${:.2f}\tSpread: ${:.2f}\tSequence: {}\n".format(
             self.best_ask, self.best_bid, self.spread, self.sequence)
         rep += "=====================================================================================\n"
@@ -136,16 +136,16 @@ class Tick:
 
 
 class Ticker(Client):
-    def __init__(self, ewa, loop, channels):
+    def __init__(self, ewm, loop, channels):
         super().__init__(loop=loop, channels=channels)
-        self.ewa = ewa
+        self.ewm = ewm
 
     def on_message(self, message):
         if message['type'] == 'ticker' and 'time' in message:
-            average = self.ewa.get()
+            average = self.ewm.get()
             tick = Tick(message, average)
             price = tick.get_price()
-            self.ewa.next(price)
+            self.ewm.next(price)
             print(tick, "\n\n")
         if message['type'] == 'heartbeat':
             print(message)
@@ -154,19 +154,19 @@ class Ticker(Client):
 
 
 class Trade:
-    def __init__(self, bids, asks, ewa):
+    def __init__(self, bids, asks, ewm):
         self.bids = bids
         self.asks = asks
-        self.ewa = ewa
+        self.ewm = ewm
 
-    def buy():
-        if price < ewa & (price / ewa) < pct:
+    def should_buy():
+        if price < ewm & (price / ewm) < pct:
             return True
         else:
             return False
 
-    def sell():
-        if price > ewa & (price / ewa) > pct:
+    def should_sell():
+        if price > ewm & (price / ewm) > pct:
             return True
         else:
             return False
@@ -174,11 +174,11 @@ class Trade:
 
 period = 200
 data = Data(period)
-average = EWA(data.get_ewa(), period)
+average = ewm(data.get_ewm(), period)
 # plt.show()
 loop = asyncio.get_event_loop()
 channels = Channel('level2', 'BTC-USD')
-ticker = Ticker(ewa=average, loop=loop, channels=channels)
+ticker = Ticker(ewm=average, loop=loop, channels=channels)
 
 try:
     loop.run_forever()

@@ -12,6 +12,7 @@ import math
 import time
 import matplotlib.pyplot as plt
 from copra.websocket import Channel, Client
+from copra.rest import Client as CopraClient
 
 
 def flatten(l): return [item for sublist in l for item in sublist]
@@ -79,14 +80,16 @@ class Data:
         return (flatten(data))
 
     def get_ewm(self):
-        data = get_data()
+        data = self.get_data()
         labels = ['timestamp', 'low', 'high', 'open', 'close', 'volume']
         df = pd.DataFrame.from_records(data, columns=labels)
         df = df.set_index('timestamp')
         df = df.sort_index(ascending=True)
         df['ewm'] = df['close'].ewm(
             span=self.period, min_periods=0, adjust=False, ignore_na=False).mean()
-        #plot_multi(df, cols=["close", "ewm"])
+        # plt.figure()
+        # df.plot()
+        # plot_multi(df, cols=["close", "ewm"])
         return df['ewm'].iloc[-1]
 
 
@@ -126,12 +129,12 @@ class Tick:
 
     def __repr__(self):
         rep = "{}\t\t\t\t {}\n".format(self.product_id, self.time)
-        rep += "=====================================================================================\n"
+        rep += "======================================================================================\n"
         rep += "Price: ${:.2f}\t\tSize: {:.8f}\tSide: {: >5}\tewm: {: >5}\n".format(
             self.price, self.size, self.side, self.ewm)
         rep += "Best ask: ${:.2f}\tBest bid: ${:.2f}\tSpread: ${:.2f}\tSequence: {}\n".format(
             self.best_ask, self.best_bid, self.spread, self.sequence)
-        rep += "=====================================================================================\n"
+        rep += "======================================================================================\n"
         return rep
 
 
@@ -149,7 +152,7 @@ class Ticker(Client):
             print(tick, "\n\n")
         if message['type'] == 'heartbeat':
             print(message)
-        if message['type'] == 'l2update':
+        if message['type'] == 'level1':
             print(message)
 
 
@@ -159,6 +162,8 @@ class Trade:
         self.asks = asks
         self.ewm = ewm
 
+
+"""
     def should_buy():
         if price < ewm & (price / ewm) < pct:
             return True
@@ -170,15 +175,42 @@ class Trade:
             return True
         else:
             return False
+            """
 
 
 period = 200
 data = Data(period)
-average = ewm(data.get_ewm(), period)
-# plt.show()
+starter = data.get_ewm()
+average = EWM(starter, period)
+
+#plt.show()
+
+"""
+
 loop = asyncio.get_event_loop()
-channels = Channel('level2', 'BTC-USD')
+channels = Channel('heartbeat', 'BTC-USD')
 ticker = Ticker(ewm=average, loop=loop, channels=channels)
+
+"""
+loop2 = asyncio.get_event_loop()
+
+client = CopraClient(loop2)
+
+async def get_order_book():
+    book = await client.order_book(product_id='BTC-USD', level=1)
+    book['time'] = datetime.now().isoformat()
+    print(book)
+    
+
+
+while True:
+    starttime=time.time()
+    loop2.run_until_complete(get_order_book())
+    time.sleep(1.0 - ((time.time() - starttime) % 1.0))
+
+
+loop2.run_until_complete(get_order_book())
+
 
 try:
     loop.run_forever()
